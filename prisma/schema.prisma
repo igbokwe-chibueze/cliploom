@@ -1,0 +1,110 @@
+generator client {
+  provider = "prisma-client"
+  output = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+model Project {
+  id String @id @default(cuid())
+  owner String @default("local-user")
+  name String
+  mode String
+  status String @default("queued")
+  stage String @default("validate")
+  error String?
+  durationMs Int @default(0)
+  width Int @default(0)
+  height Int @default(0)
+  clipCount Int @default(5)
+  selectionVersion Int @default(0)
+  deletedAt DateTime?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  assets MediaAsset[]
+  transcript Transcript?
+  clips Clip[]
+  jobs Job[]
+  renders Render[]
+}
+
+model MediaAsset {
+  id String @id @default(cuid())
+  projectId String
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  kind String
+  key String @unique
+  mime String
+  bytes Int
+  metadata Json?
+  createdAt DateTime @default(now())
+  @@unique([projectId, kind])
+}
+
+model Transcript {
+  id String @id @default(cuid())
+  projectId String @unique
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  original Json
+  edited Json
+  provider String
+  model String
+  usage Json?
+  version Int @default(1)
+  createdAt DateTime @default(now())
+}
+
+model Clip {
+  id String @id @default(cuid())
+  projectId String
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  title String
+  reason String
+  startMs Int
+  endMs Int
+  revision Int @default(1)
+  settings Json
+  createdAt DateTime @default(now())
+  renders Render[]
+}
+
+model Render {
+  id String @id @default(cuid())
+  projectId String
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  clipId String
+  clip Clip @relation(fields: [clipId], references: [id], onDelete: Cascade)
+  revision Int
+  spec Json
+  status String @default("queued")
+  key String?
+  error String?
+  createdAt DateTime @default(now())
+  @@unique([clipId, revision])
+}
+
+model Job {
+  id String @id @default(cuid())
+  projectId String
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  type String
+  renderId String?
+  idempotencyKey String @unique
+  status String @default("queued")
+  stage String @default("queued")
+  attempts Int @default(0)
+  runAfter DateTime @default(now())
+  leaseUntil DateTime?
+  error String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  @@index([status, runAfter])
+}
+
+model WorkerLock {
+  id String @id
+  owner String
+  leaseUntil DateTime
+}

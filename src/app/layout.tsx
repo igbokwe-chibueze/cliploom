@@ -1,10 +1,11 @@
 import type { Metadata } from "next";
+import { brand } from "@/lib/brand";
 import type { ReactNode } from "react";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Cliploom",
-  description: "Cliploom web application.",
+  title: brand.name,
+  description: `${brand.name} local video editing workspace.`,
 };
 
 export default function RootLayout({ children }: { children: ReactNode }) {

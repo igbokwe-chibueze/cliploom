@@ -1,3 +1,4 @@
+import { setTimeout as delay } from 'node:timers/promises';
 import { randomUUID } from 'node:crypto';
 import { db } from './db';
 import { config } from './config';
@@ -21,14 +22,27 @@ export async function recoverStaleJobs(now = new Date()) {
     });
   }
 }
+export async function waitForWorkerLease(signal: AbortSignal, onWait: () => void = () => {}) {
+  let reported = false;
+  while (!signal.aborted) {
+    if (await acquireWorker()) return;
+    if (!reported) { onWait(); reported = true; }
+    await delay(1000, undefined, { signal });
+  }
+  signal.throwIfAborted();
+}
 export async function claimJob() {
-  const candidate = await db.job.findFirst({ where: { status: 'queued', runAfter: { lte: new Date() }, project: { deletedAt: null } }, orderBy: { createdAt: 'asc' } });
-  if (!candidate) return null;
-  const claimed = await db.job.updateMany({ where: { id: candidate.id, status: 'queued' }, data: { status: 'running', attempts: { increment: 1 }, leaseUntil: lease(), error: null } });
-  return claimed.count ? db.job.findUniqueOrThrow({ where: { id: candidate.id } }) : null;
+  return db.$transaction(async tx => {
+    const lock = await tx.workerLock.findUnique({ where: { id: 'single' } });
+    if (!lock || lock.owner !== workerOwner || lock.leaseUntil <= new Date()) throw new Error('Worker lease lost.');
+    const candidate = await tx.job.findFirst({ where: { status: 'queued', runAfter: { lte: new Date() }, project: { deletedAt: null } }, orderBy: { createdAt: 'asc' } });
+    if (!candidate) return null;
+    const claimed = await tx.job.updateMany({ where: { id: candidate.id, status: 'queued' }, data: { status: 'running', attempts: { increment: 1 }, leaseUntil: lease(), error: null } });
+    return claimed.count ? tx.job.findUniqueOrThrow({ where: { id: candidate.id } }) : null;
+  });
 }
 export async function heartbeat(jobId?: string) {
-  const held = await db.workerLock.updateMany({ where: { id: 'single', owner: workerOwner }, data: { leaseUntil: lease() } });
+  const held = await db.workerLock.updateMany({ where: { id: 'single', owner: workerOwner, leaseUntil: { gt: new Date() } }, data: { leaseUntil: lease() } });
   if (!held.count) throw new Error('Worker lease lost.');
   if (jobId) {
     const job = await db.job.findUnique({ where: { id: jobId }, include: { project: true } });

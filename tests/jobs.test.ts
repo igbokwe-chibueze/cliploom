@@ -10,14 +10,23 @@ test('persistent queue deduplicates, claims once, recovers stale leases and excl
   process.env.DATABASE_URL = `file:${file.replaceAll('\\', '/')}`;
   execFileSync(process.execPath, ['node_modules/prisma/build/index.js', 'migrate', 'deploy'], { env: process.env, stdio: 'pipe', windowsHide: true });
   const { db } = await import('../src/lib/db');
-  const { acquireWorker, claimJob, enqueue, recoverStaleJobs, workerOwner } = await import('../src/lib/jobs');
+  const { acquireWorker, claimJob, enqueue, recoverStaleJobs, workerOwner, waitForWorkerLease, heartbeat } = await import('../src/lib/jobs');
   try {
     const project = await db.project.create({ data: { name: 'Queue test', mode: 'fixture' } });
     const first = await enqueue(project.id, 'process', 'unique-test'); const second = await enqueue(project.id, 'process', 'unique-test');
     assert.equal(first.id, second.id); assert.equal(await db.job.count(), 1);
     assert.equal(await acquireWorker(), true);
     await db.workerLock.update({ where: { id: 'single' }, data: { owner: 'different-worker' } }); assert.equal(await acquireWorker(), false);
-    await db.workerLock.update({ where: { id: 'single' }, data: { owner: workerOwner } });
+    const waiting = waitForWorkerLease(new AbortController().signal);
+    await new Promise(resolve => setTimeout(resolve, 30));
+    assert.equal((await db.workerLock.findUniqueOrThrow({ where: { id: 'single' } })).owner, 'different-worker', 'A waiting replacement must not steal a live lock');
+    await db.workerLock.update({ where: { id: 'single' }, data: { leaseUntil: new Date(0) } });
+    await waiting;
+    assert.equal((await db.workerLock.findUniqueOrThrow({ where: { id: 'single' } })).owner, workerOwner);
+    await db.workerLock.update({ where: { id: 'single' }, data: { leaseUntil: new Date(0) } });
+    await assert.rejects(heartbeat(), /lease lost/);
+    await assert.rejects(claimJob(), /lease lost/);
+    assert.equal(await acquireWorker(), true);
     const claims = await Promise.all([claimJob(), claimJob()]); assert.equal(claims.filter(Boolean).length, 1);
     await db.job.update({ where: { id: first.id }, data: { leaseUntil: new Date(0), stage: 'transcribe' } });
     await recoverStaleJobs(); const recovered = await db.job.findUniqueOrThrow({ where: { id: first.id } });

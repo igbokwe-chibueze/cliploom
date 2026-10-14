@@ -23,7 +23,7 @@ npm.cmd run doctor
 npm.cmd run dev
 ```
 
-Open **http://localhost:3000**. `dev` starts web and worker together; Ctrl+C stops
+Open **http://localhost:3100**. `dev` starts web and worker together; Ctrl+C stops
 both. The checked-in example defaults to **AI_MODE=fixture**, which makes no AI
 calls. The local .env is ignored by Git. Existing .env files are never overwritten.
 
@@ -144,7 +144,7 @@ from another working directory.
 | --- | --- |
 | `DATABASE_URL` | `file:./data/cliploom.db`; SQLite file |
 | `MEDIA_STORAGE_DIR` | `./data/media`; outside public/ |
-| `LOCAL_ORIGIN` | `http://localhost:3000`; mutation origin and port check |
+| `LOCAL_ORIGIN` | `http://localhost:3100`; mutation origin and port check |
 | `MAX_UPLOAD_MB` | 1024; enforced while streaming, even without Content-Length |
 | `MAX_DURATION_MINUTES` | 120; enforced by ffprobe |
 | `CLIP_COUNT` | 5; per-upload override 1–10 |
@@ -212,8 +212,9 @@ tracking, or authentication is included.
   source duration. Clip intervals must be positive and no longer than 180 seconds.
 - **Media failure:** check FFmpeg capabilities, try a shorter valid video with an
   audio track, and use Retry. Render failures do not transcribe the source again.
-- **Port change:** set LOCAL_ORIGIN to the same loopback port and use
-  `npm run dev:web -- --port 3001`; run the worker separately. Do not bind publicly.
+- **Port change:** change the port in the dev:web and start scripts in package.json, and
+  set LOCAL_ORIGIN to that same loopback URL in .env (and .env.local if present).
+  Restart both processes. The default is 3100; port 3000 is left free. Do not bind publicly.
 
 Dependency audit at implementation time: npm reports nine high-severity entries
 in Prisma CLI / Next.js ESLint development-tool dependency chains. Its proposed
@@ -225,3 +226,31 @@ editable caption copy by ending the earlier cue at the next cue's start. The
 original transcript is untouched. Retimed cues use phrase captions. Ordering is
 validated for the selected clip; unrelated overlaps outside it do not block saving.
 Manual timing mistakes in the selected interval still require correction.
+
+Worker recovery and status: a second or restarted worker now waits for the existing
+lease instead of exiting. It automatically starts after release/expiry, while only
+one worker claims jobs. Expired owners cannot renew or claim jobs. The header uses
+heartbeat freshness (10 seconds), independently of the 90-second ownership lease,
+so a stopped worker becomes Recovering before its lock expires. Project pages show
+waiting, queued, active stages, scheduled retries, attempts, and terminal errors.
+Do not repeatedly launch workers; keep one worker terminal running.
+
+Clip-count selection is remembered in browser localStorage across navigation and
+refresh. Loading server defaults cannot replace an already chosen count. Uploads
+wait for configuration to load, send the selected count, and show the persisted
+requested count beside the generated count. Existing projects keep their original
+requested count; this change does not regenerate their suggestions.
+
+Provider errors now distinguish invalid keys, permissions, unavailable models,
+rate limits, exhausted quota/credit restrictions, timeouts, network problems, and
+service overload. Retry-After is respected (seconds, HTTP date, and Gemini retry
+metadata when available); long delays are persisted in the queue. Gemini SDK
+retries are disabled so application retry bounds are not multiplied silently.
+No provider or model is substituted automatically.
+
+Run `npm.cmd run verify:exports` to inspect up to five existing completed exports
+without AI calls or new renders. It checks duration/dimensions, H.264/AAC/yuv420p,
+fast-start metadata, full decode, and sampled audio alignment against the original
+interval. Reports and extracted frames are kept in `data/export-checks/`. Audio
+correlation cannot judge source lip sync, caption accuracy, sentence completeness,
+or editorial meaning; those still require listening/viewing the downloaded clips.

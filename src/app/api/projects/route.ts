@@ -28,6 +28,6 @@ export async function POST(request: Request) {
     await rename(temporary, final);
     await db.project.create({ data: { id, name: name.replace(/[\x00-\x1f]/g, '').slice(0, 180), mode: config.AI_MODE, clipCount: count, assets: { create: { kind: 'source', key, bytes, mime: extension === 'webm' ? 'video/webm' : extension === 'mov' ? 'video/quicktime' : 'video/mp4' } }, jobs: { create: { type: 'process', idempotencyKey: `process:${id}` } } } });
     committed = true;
-    return Response.json({ id }, { status: 201 });
+    return Response.json({ id, clipCount: count }, { status: 201 });
   } catch (error) { return errorResponse(error); } finally { if (!committed) await rm(storage.path(id), { recursive: true, force: true }).catch(() => {}); }
 }

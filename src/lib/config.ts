@@ -21,7 +21,7 @@ const env = z.object({
   CLIP_COUNT: z.coerce.number().int().min(1).max(10).default(5),
   TRANSCRIPTION_MODEL: z.string().default('whisper-large-v3-turbo'),
   CLIP_SELECTION_MODEL: z.string().default('gemini-2.5-flash-lite'),
-  LOCAL_ORIGIN: z.string().url().default('http://localhost:3000'),
+  LOCAL_ORIGIN: z.string().url().default('http://localhost:3100'),
   GROQ_API_KEY: z.string().optional(),
   GEMINI_API_KEY: z.string().optional(),
 }).parse(process.env);

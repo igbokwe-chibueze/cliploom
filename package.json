@@ -4,11 +4,11 @@
   "private": true,
   "scripts": {
     "dev": "concurrently --kill-others --names web,worker \"npm run dev:web\" \"npm run dev:worker\"",
-    "dev:web": "next dev --hostname localhost",
+    "dev:web": "next dev --hostname localhost --port 3100",
     "dev:worker": "tsx watch worker/index.ts",
     "worker": "tsx worker/index.ts",
     "build": "prisma generate && next build",
-    "start": "next start --hostname localhost",
+    "start": "next start --hostname localhost --port 3100",
     "lint": "eslint src worker scripts tests prisma.config.ts next.config.ts",
     "typecheck": "next typegen && tsc --noEmit",
     "test": "tsx --test tests/*.test.ts",
@@ -16,7 +16,8 @@
     "db:setup": "prisma migrate deploy && prisma generate",
     "db:migrate": "prisma migrate dev",
     "doctor": "tsx scripts/doctor.ts",
-    "fixture:create": "tsx scripts/create-fixture.ts"
+    "fixture:create": "tsx scripts/create-fixture.ts",
+    "verify:exports": "tsx scripts/verify-exports.ts"
   },
   "dependencies": {
     "@google/genai": "^2.29.1",

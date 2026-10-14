@@ -7,21 +7,8 @@ import { groupWords, mergeChunks, resolveSelection, selectionSchema, selectionUn
 
 export interface Transcriber { transcribe(file: string, durationMs: number, signal?: AbortSignal): Promise<{ data: TranscriptData; usage: unknown }> }
 export interface Selector { select(data: TranscriptData, durationMs: number, count: number, signal?: AbortSignal): Promise<{ clips: Suggestion[]; usage: unknown }> }
-export function temporaryFailure(error: unknown) {
-  const e = error as { status?: number; code?: string; message?: string };
-  return [408, 429, 500, 502, 503, 504].includes(e.status ?? 0) && !/quota|billing|credit|insufficient/i.test(e.message ?? '') || ['ECONNRESET', 'ETIMEDOUT', 'EAI_AGAIN'].includes(e.code ?? '');
-}
-export async function withRetry<T>(fn: () => Promise<T>, signal?: AbortSignal): Promise<T> {
-  for (let attempt = 0; ; attempt++) {
-    try { signal?.throwIfAborted(); return await fn(); } catch (error) {
-      if (signal?.aborted || attempt >= 2 || !temporaryFailure(error)) throw error;
-      const headers = (error as { headers?: Headers }).headers;
-      const retryAfter = Number(headers?.get?.('retry-after'));
-      const delay = Math.min(60_000, Math.max(Number.isFinite(retryAfter) ? retryAfter * 1000 : 0, 1500 * 2 ** attempt + Math.random() * 500));
-      await new Promise(resolve => setTimeout(resolve, delay));
-    }
-  }
-}
+import { withRetry } from './errors';
+export { safeError, temporaryFailure, withRetry } from './errors';
 const groqResult = z.object({ text: z.string(), words: z.array(z.object({ word: z.string(), start: z.number(), end: z.number() })).optional(), segments: z.array(z.object({ text: z.string(), start: z.number(), end: z.number() })).optional() });
 export const groqTranscriber: Transcriber = {
   async transcribe(file, durationMs, signal) {
@@ -41,7 +28,7 @@ const responseSchema = { type: Type.OBJECT, properties: { clips: { type: Type.AR
 export const geminiSelector: Selector = {
   async select(data, durationMs, count, signal) {
     if (!config.GEMINI_API_KEY) throw new Error('Set GEMINI_API_KEY in .env, then retry selection.');
-    const ai = new GoogleGenAI({ apiKey: config.GEMINI_API_KEY, httpOptions: { timeout: 120_000 } });
+    const ai = new GoogleGenAI({ apiKey: config.GEMINI_API_KEY, httpOptions: { timeout: 120_000, retryOptions: { attempts: 1 } } });
     // Bound input without dropping sections: compact transcript, analyzed in coherent windows.
     const units = selectionUnits(data.segments);
     const windows: typeof units[] = []; let window: typeof units = []; let chars = 0;
@@ -85,11 +72,3 @@ export const fixtureSelector: Selector = {
     return { clips: first && last && count ? [{ title: 'Fixture: review and export', reason: 'Synthetic suggestion for testing the editor and actual FFmpeg rendering. Not AI analysis of this video.', startMs: first.startMs, endMs: last.endMs }] : [], usage: { fixture: true, providerCalls: 0 } };
   },
 };
-export function safeError(error: unknown) {
-  const e = error as { status?: number; message?: string };
-  if (e.status === 401 || e.status === 403) return 'Provider access denied. Check the server API key and model permissions. No fallback model was used.';
-  if (e.status === 404) return 'Configured model is unavailable to this account. Check model access; no fallback was used. Gemini 2.5 access may require prior use.';
-  if (e.status === 429) return 'Provider rate limit or quota reached. Wait or check your account quota, then retry.';
-  if (e.status) return `Provider request failed (${e.status}). Check the configured model and account. Saved stages will be reused.`;
-  return (e.message ?? 'Processing failed. Retry the saved stage.').replace(/[A-Za-z]:\\[^\n]+/g, '[local path]').slice(0, 450);
-}
